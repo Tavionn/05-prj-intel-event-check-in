@@ -31,12 +31,25 @@
         Attendance: <span id="attendeeCount">0</span>/50
       </div>
       <div class="progress-container">
-        <div id="progressBar" class="progress-bar"></div>
+        <div
+          id="progressBar"
+          class="progress-bar"
+          role="progressbar"
+          aria-label="Attendance goal progress"
+          aria-valuemin="0"
+          aria-valuemax="50"
+          aria-valuenow="0"
+        ></div>
+      </div>
+      <div id="celebration" class="celebration" role="status" aria-live="polite" hidden>
+        <h2>🎉 Attendance goal reached!</h2>
+        <p id="celebrationMessage"></p>
       </div>
     </div>
     <div class="container">
       <!-- Feedback message -->
       <p id="greeting"></p>
+      <p id="storageNotice" class="storage-notice" role="status" aria-live="polite" hidden></p>
 
       <!-- Check-in form -->
       <form class="check-in" id="checkInForm">
@@ -80,6 +93,12 @@
             <span class="team-count" id="powerCount">0</span>
           </div>
         </div>
+
+        <!-- Attendee list -->
+        <section class="attendee-section" aria-labelledby="attendeeListHeading">
+          <h3 id="attendeeListHeading">Attendee List</h3>
+          <ul id="attendeeList" class="attendee-list"></ul>
+        </section>
       </div>
     </div>
 
