@@ -5,12 +5,15 @@ const attendeeCount = document.getElementById("attendeeCount");
 const progressBar = document.getElementById("progressBar");
 const greeting = document.getElementById("greeting");
 const statusNotice = document.getElementById("statusNotice");
+const localModeNotice = document.getElementById("localModeNotice");
 const attendeeList = document.getElementById("attendeeList");
 const celebration = document.getElementById("celebration");
 const celebrationMessage = document.getElementById("celebrationMessage");
 const checkInButton = document.getElementById("checkInBtn");
+const resetFormButton = document.getElementById("resetFormBtn");
 
 const maxCount = 50;
+const localAttendanceKey = "intel-sustainability-summit-attendees";
 const isConfigured =
   typeof supabaseUrl === "string" &&
   supabaseUrl.startsWith("https://") &&
@@ -26,6 +29,7 @@ let attendees = [];
 let isLoading = true;
 let isRefreshing = false;
 let isSubmitting = false;
+let localStorageReady = true;
 
 function showStatusNotice(message) {
   statusNotice.textContent = message;
@@ -71,7 +75,10 @@ function updateCounters() {
   progressBar.style.width = `${completedPercentage}%`;
   progressBar.setAttribute("aria-valuenow", Math.min(attendees.length, maxCount));
   checkInButton.disabled =
-    !isConfigured || isLoading || isSubmitting || attendees.length >= maxCount;
+    isLoading ||
+    isSubmitting ||
+    (!isConfigured && !localStorageReady) ||
+    attendees.length >= maxCount;
 
   if (attendees.length >= maxCount) {
     showCelebration(teamCounts);
@@ -133,6 +140,58 @@ function isValidAttendee(attendee) {
     typeof attendee.name === "string" &&
     Object.prototype.hasOwnProperty.call(teamNames, attendee.team)
   );
+}
+
+function loadLocalAttendance() {
+  try {
+    const savedAttendance = localStorage.getItem(localAttendanceKey);
+
+    if (savedAttendance !== null) {
+      const savedAttendees = JSON.parse(savedAttendance);
+
+      if (!Array.isArray(savedAttendees) || savedAttendees.length > maxCount) {
+        throw new Error("The saved local attendance data has an invalid format.");
+      }
+
+      for (let index = 0; index < savedAttendees.length; index++) {
+        const attendee = savedAttendees[index];
+
+        if (
+          !isValidAttendee(attendee) ||
+          attendee.name.trim().length === 0 ||
+          attendee.name.length > 120
+        ) {
+          throw new Error("The saved local attendance data has an invalid attendee.");
+        }
+      }
+
+      attendees = savedAttendees;
+    }
+
+    localStorageReady = true;
+    updateCounters();
+    updateAttendeeList();
+  } catch (error) {
+    localStorageReady = false;
+    console.error("Unable to load local attendance.", error);
+    showStatusNotice(
+      "Local attendance could not be loaded from this browser. Check browser storage and refresh the page."
+    );
+  } finally {
+    isLoading = false;
+    updateCounters();
+  }
+}
+
+function saveLocalAttendee(name, team) {
+  const attendee = {
+    name: name,
+    team: team
+  };
+  const updatedAttendees = attendees.concat(attendee);
+
+  localStorage.setItem(localAttendanceKey, JSON.stringify(updatedAttendees));
+  return attendee;
 }
 
 async function loadAttendance(showErrors) {
@@ -242,7 +301,9 @@ form.addEventListener("submit", async function(event) {
   updateCounters();
 
   try {
-    const attendee = await checkInAttendee(name, team);
+    const attendee = isConfigured
+      ? await checkInAttendee(name, team)
+      : saveLocalAttendee(name, team);
     attendees.push(attendee);
     updateCounters();
     updateAttendeeList();
@@ -252,13 +313,50 @@ form.addEventListener("submit", async function(event) {
     greeting.style.display = "block";
     form.reset();
   } catch (error) {
-    console.error("Unable to save shared check-in.", error);
-    showStatusNotice(
-      "Check-in could not be saved. Please check your connection and try again."
-    );
+    console.error("Unable to save check-in.", error);
+
+    if (isConfigured) {
+      showStatusNotice(
+        "Check-in could not be saved. Please check your connection and try again."
+      );
+    } else {
+      localStorageReady = false;
+      showStatusNotice(
+        "Check-in could not be saved in this browser. Check available browser storage and try again."
+      );
+    }
   } finally {
     isSubmitting = false;
     updateCounters();
+  }
+});
+
+resetFormButton.addEventListener("click", function() {
+  form.reset();
+  nameInput.setCustomValidity("");
+  greeting.textContent = "";
+  greeting.className = "";
+  greeting.style.display = "none";
+
+  if (isConfigured) {
+    showStatusNotice(
+      "Shared attendance cannot be cleared from this browser-only reset button."
+    );
+    return;
+  }
+
+  try {
+    localStorage.removeItem(localAttendanceKey);
+    attendees = [];
+    localStorageReady = true;
+    clearStatusNotice();
+    updateCounters();
+    updateAttendeeList();
+  } catch (error) {
+    console.error("Unable to reset local attendance.", error);
+    showStatusNotice(
+      "Attendance could not be reset in this browser. Check browser storage and try again."
+    );
   }
 });
 
@@ -266,11 +364,8 @@ updateCounters();
 updateAttendeeList();
 
 if (!isConfigured) {
-  isLoading = false;
-  updateCounters();
-  showStatusNotice(
-    "Add your Supabase project URL and publishable key in supabase-config.js to enable shared check-ins."
-  );
+  localModeNotice.hidden = false;
+  loadLocalAttendance();
 } else {
   loadAttendance(true);
   setInterval(function() {

@@ -50,6 +50,9 @@
       <!-- Feedback message -->
       <p id="greeting"></p>
       <p id="statusNotice" class="storage-notice" role="status" aria-live="polite" hidden></p>
+      <p id="localModeNotice" class="storage-notice" role="status" hidden>
+        Local mode: check-ins are saved only in this browser and are not shared with other devices.
+      </p>
 
       <!-- Check-in form -->
       <form class="check-in" id="checkInForm">
@@ -99,6 +102,7 @@
         <section class="attendee-section" aria-labelledby="attendeeListHeading">
           <h3 id="attendeeListHeading">Attendee List</h3>
           <ul id="attendeeList" class="attendee-list"></ul>
+          <button type="button" id="resetFormBtn">Reset</button>
         </section>
       </div>
     </div>

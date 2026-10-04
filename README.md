@@ -3,6 +3,10 @@
 The app uses Supabase so check-ins are shared between the local page and the
 GitHub Pages site. Attendance updates refresh automatically every five seconds.
 
+If Supabase is not configured, the app runs in local mode instead. Check-ins
+are saved in the current browser only and are not shared across browsers or
+devices.
+
 ## Set up shared attendance
 
 1. Create a project at [supabase.com](https://supabase.com/).

@@ -418,6 +418,10 @@ select {
   text-align: center;
 }
 
+#resetFormBtn {
+  margin: 16px auto 0;
+}
+
 button:disabled {
   background-color: #64748b;
   box-shadow: none;
