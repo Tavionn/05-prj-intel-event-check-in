@@ -4,120 +4,60 @@ const teamSelect = document.getElementById("teamSelect");
 const attendeeCount = document.getElementById("attendeeCount");
 const progressBar = document.getElementById("progressBar");
 const greeting = document.getElementById("greeting");
-const storageNotice = document.getElementById("storageNotice");
+const statusNotice = document.getElementById("statusNotice");
 const attendeeList = document.getElementById("attendeeList");
 const celebration = document.getElementById("celebration");
 const celebrationMessage = document.getElementById("celebrationMessage");
 const checkInButton = document.getElementById("checkInBtn");
 
-let count = 0;
 const maxCount = 50;
-const storageKey = "intelSummitAttendance";
+const isConfigured =
+  typeof supabaseUrl === "string" &&
+  supabaseUrl.startsWith("https://") &&
+  !supabaseUrl.includes("YOUR_SUPABASE") &&
+  typeof supabaseAnonKey === "string" &&
+  !supabaseAnonKey.includes("YOUR_SUPABASE");
 const teamNames = {
   water: "Team Water Wise",
   zero: "Team Net Zero",
   power: "Team Renewables"
 };
-let teamCounts = {
-  water: 0,
-  zero: 0,
-  power: 0
-};
 let attendees = [];
+let isLoading = true;
+let isRefreshing = false;
+let isSubmitting = false;
 
-function showStorageNotice(message) {
-  storageNotice.textContent = message;
-  storageNotice.hidden = false;
+function showStatusNotice(message) {
+  statusNotice.textContent = message;
+  statusNotice.hidden = false;
 }
 
-function isValidProgress(progress) {
-  const teams = Object.keys(teamNames);
-
-  if (
-    !progress ||
-    !Number.isInteger(progress.count) ||
-    progress.count < 0 ||
-    progress.count > maxCount ||
-    !progress.teamCounts ||
-    !Array.isArray(progress.attendees)
-  ) {
-    return false;
-  }
-
-  for (let index = 0; index < teams.length; index++) {
-    const team = teams[index];
-
-    if (
-      !Number.isInteger(progress.teamCounts[team]) ||
-      progress.teamCounts[team] < 0
-    ) {
-      return false;
-    }
-  }
-
-  for (let index = 0; index < progress.attendees.length; index++) {
-    const attendee = progress.attendees[index];
-
-    if (
-      !attendee ||
-      typeof attendee.name !== "string" ||
-      !teams.includes(attendee.team)
-    ) {
-      return false;
-    }
-  }
-
-  return true;
+function clearStatusNotice() {
+  statusNotice.textContent = "";
+  statusNotice.hidden = true;
 }
 
-function loadProgress() {
-  let savedProgress;
-
-  try {
-    savedProgress = localStorage.getItem(storageKey);
-  } catch (error) {
-    console.error("Unable to read saved attendance from local storage.", error);
-    showStorageNotice("Saved attendance could not be read in this browser.");
-    return;
-  }
-
-  if (!savedProgress) {
-    return;
-  }
-
-  try {
-    const progress = JSON.parse(savedProgress);
-
-    if (!isValidProgress(progress)) {
-      throw new Error("Saved attendance data has an invalid format.");
-    }
-
-    count = progress.count;
-    teamCounts = progress.teamCounts;
-    attendees = progress.attendees;
-  } catch (error) {
-    console.error("Unable to load saved attendance.", error);
-    showStorageNotice("Saved attendance is invalid and could not be loaded.");
-  }
-}
-
-function saveProgress() {
-  const progress = {
-    count: count,
-    teamCounts: teamCounts,
-    attendees: attendees
+function getHeaders() {
+  return {
+    apikey: supabaseAnonKey,
+    Authorization: `Bearer ${supabaseAnonKey}`,
+    "Content-Type": "application/json"
   };
-
-  try {
-    localStorage.setItem(storageKey, JSON.stringify(progress));
-  } catch (error) {
-    console.error("Unable to save attendance to local storage.", error);
-    showStorageNotice("Attendance could not be saved in this browser.");
-  }
 }
 
 function updateCounters() {
-  attendeeCount.textContent = count;
+  const teamCounts = {
+    water: 0,
+    zero: 0,
+    power: 0
+  };
+
+  attendeeCount.textContent = attendees.length;
+
+  for (let index = 0; index < attendees.length; index++) {
+    const attendee = attendees[index];
+    teamCounts[attendee.team]++;
+  }
 
   const teams = Object.keys(teamCounts);
 
@@ -127,10 +67,17 @@ function updateCounters() {
     teamCounter.textContent = teamCounts[team];
   }
 
-  const completedPercentage = Math.min((count / maxCount) * 100, 100);
+  const completedPercentage = Math.min((attendees.length / maxCount) * 100, 100);
   progressBar.style.width = `${completedPercentage}%`;
-  progressBar.setAttribute("aria-valuenow", Math.min(count, maxCount));
-  checkInButton.disabled = count >= maxCount;
+  progressBar.setAttribute("aria-valuenow", Math.min(attendees.length, maxCount));
+  checkInButton.disabled =
+    !isConfigured || isLoading || isSubmitting || attendees.length >= maxCount;
+
+  if (attendees.length >= maxCount) {
+    showCelebration(teamCounts);
+  } else {
+    celebration.hidden = true;
+  }
 }
 
 function updateAttendeeList() {
@@ -152,7 +99,7 @@ function updateAttendeeList() {
   }
 }
 
-function showCelebration() {
+function showCelebration(teamCounts) {
   let highestTeamCount = 0;
   const winningTeams = [];
   const teams = Object.keys(teamCounts);
@@ -180,48 +127,153 @@ function showCelebration() {
   celebration.hidden = false;
 }
 
-loadProgress();
-updateCounters();
-updateAttendeeList();
-
-if (count >= maxCount) {
-  showCelebration();
+function isValidAttendee(attendee) {
+  return (
+    attendee &&
+    typeof attendee.name === "string" &&
+    Object.prototype.hasOwnProperty.call(teamNames, attendee.team)
+  );
 }
 
-form.addEventListener("submit", function(event) {
-    event.preventDefault();
+async function loadAttendance(showErrors) {
+  if (isRefreshing) {
+    return;
+  }
 
-    if (count >= maxCount) {
-      return;
+  isRefreshing = true;
+
+  try {
+    const response = await fetch(
+      `${supabaseUrl.replace(/\/+$/, "")}/rest/v1/attendees?select=id,name,team,created_at&order=created_at.asc,id.asc`,
+      {
+        headers: getHeaders()
+      }
+    );
+
+    if (!response.ok) {
+      const errorDetails = await response.text();
+      throw new Error(`Supabase returned ${response.status}: ${errorDetails}`);
     }
 
-    const name = nameInput.value.trim();
-    const team = teamSelect.value;
+    const savedAttendees = await response.json();
 
-    if (name.length === 0) {
-      nameInput.setCustomValidity("Please enter an attendee name.");
-      nameInput.reportValidity();
-      return;
+    if (
+      !Array.isArray(savedAttendees) ||
+      savedAttendees.length > maxCount
+    ) {
+      throw new Error("The saved attendance data has an invalid format.");
     }
 
-    nameInput.setCustomValidity("");
-    count++;
-    teamCounts[team]++;
-    attendees.push({
-      name: name,
-      team: team
-    });
+    for (let index = 0; index < savedAttendees.length; index++) {
+      if (!isValidAttendee(savedAttendees[index])) {
+        throw new Error("The saved attendance data has an invalid attendee.");
+      }
+    }
 
+    attendees = savedAttendees;
+    clearStatusNotice();
     updateCounters();
     updateAttendeeList();
-    saveProgress();
+  } catch (error) {
+    console.error("Unable to load shared attendance.", error);
+
+    if (showErrors) {
+      showStatusNotice(
+        "Shared attendance could not be loaded. Check the Supabase setup and your internet connection."
+      );
+    }
+  } finally {
+    isRefreshing = false;
+    isLoading = false;
+    updateCounters();
+  }
+}
+
+async function checkInAttendee(name, team) {
+  const response = await fetch(
+    `${supabaseUrl.replace(/\/+$/, "")}/rest/v1/rpc/check_in_attendee`,
+    {
+      method: "POST",
+      headers: getHeaders(),
+      body: JSON.stringify({
+        attendee_name: name,
+        attendee_team: team
+      })
+    }
+  );
+
+  if (!response.ok) {
+    const errorDetails = await response.text();
+    throw new Error(`Supabase returned ${response.status}: ${errorDetails}`);
+  }
+
+  const insertedAttendees = await response.json();
+
+  if (
+    !Array.isArray(insertedAttendees) ||
+    insertedAttendees.length !== 1 ||
+    !isValidAttendee(insertedAttendees[0])
+  ) {
+    throw new Error("Supabase returned an invalid check-in response.");
+  }
+
+  return insertedAttendees[0];
+}
+
+form.addEventListener("submit", async function(event) {
+  event.preventDefault();
+
+  if (isLoading || isSubmitting || attendees.length >= maxCount) {
+    return;
+  }
+
+  const name = nameInput.value.trim();
+  const team = teamSelect.value;
+
+  if (name.length === 0) {
+    nameInput.setCustomValidity("Please enter an attendee name.");
+    nameInput.reportValidity();
+    return;
+  }
+
+  nameInput.setCustomValidity("");
+  isSubmitting = true;
+  clearStatusNotice();
+  updateCounters();
+
+  try {
+    const attendee = await checkInAttendee(name, team);
+    attendees.push(attendee);
+    updateCounters();
+    updateAttendeeList();
 
     greeting.textContent = `Welcome, ${name} from ${teamNames[team]}!`;
     greeting.className = "success-message";
     greeting.style.display = "block";
     form.reset();
-
-    if (count >= maxCount) {
-      showCelebration();
-    }
+  } catch (error) {
+    console.error("Unable to save shared check-in.", error);
+    showStatusNotice(
+      "Check-in could not be saved. Please check your connection and try again."
+    );
+  } finally {
+    isSubmitting = false;
+    updateCounters();
+  }
 });
+
+updateCounters();
+updateAttendeeList();
+
+if (!isConfigured) {
+  isLoading = false;
+  updateCounters();
+  showStatusNotice(
+    "Add your Supabase project URL and publishable key in supabase-config.js to enable shared check-ins."
+  );
+} else {
+  loadAttendance(true);
+  setInterval(function() {
+    loadAttendance(true);
+  }, 5000);
+}

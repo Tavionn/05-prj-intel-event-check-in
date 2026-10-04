@@ -49,7 +49,7 @@
     <div class="container">
       <!-- Feedback message -->
       <p id="greeting"></p>
-      <p id="storageNotice" class="storage-notice" role="status" aria-live="polite" hidden></p>
+      <p id="statusNotice" class="storage-notice" role="status" aria-live="polite" hidden></p>
 
       <!-- Check-in form -->
       <form class="check-in" id="checkInForm">
@@ -61,6 +61,7 @@
               id="attendeeName"
               name="attendeeName"
               placeholder="Enter name..."
+              maxlength="120"
               required
             />
             <select id="teamSelect" name="team" required>
@@ -111,6 +112,7 @@
       >
     </footer>
 
+    <script src="supabase-config.js"></script>
     <script src="script.js"></script>
   </body>
 </html>
